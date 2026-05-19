@@ -44,8 +44,9 @@
 # 文档
 
 安装及使用：https://233boy.com/sing-box/sing-box-script/
+```
 bash <(curl -Ls https://raw.githubusercontent.com/zla5/sing-box/refs/heads/main/install.sh)
-
+```
 # 帮助
 
 使用：`sing-box help`
