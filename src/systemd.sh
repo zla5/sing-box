@@ -24,6 +24,7 @@ After=network.target nss-lookup.target
 #User=nobody
 User=root
 NoNewPrivileges=true
+ExecStartPre=-$is_sh_bin hy2-hop-restore
 ExecStart=$is_core_bin run -c $is_config_json -C $is_conf_dir
 Restart=on-failure
 RestartPreventExitStatus=23
@@ -90,6 +91,10 @@ supervisor=supervise-daemon
 depend() {
     need net
     after firewall
+}
+
+start_pre() {
+    $is_sh_bin hy2-hop-restore >/dev/null 2>&1 || true
 }
 EOF
         chmod +x /etc/init.d/$is_core

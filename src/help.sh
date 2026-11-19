@@ -23,6 +23,8 @@ show_help() {
             "   qr [name]                                       二维码信息"
             "   url [name]                                      URL 信息"
             "   log                                             查看日志"
+            "   # Hysteria2: add hy2 [port] [password] [hop_ports|auto|off]"
+            "   # 默认端口跳跃: 26800-27799 (避开常用/临时端口段)"
             # "   logerr                                          查看错误日志\n"
             "更改:"
             # "   dp, dynamicport [name] [start | auto] [end]     更改动态端口"

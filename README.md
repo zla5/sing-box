@@ -15,7 +15,7 @@
 - 一键添加 VLESS-REALITY (默认)
 - 一键添加 TUIC
 - 一键添加 Trojan
-- 一键添加 Hysteria2
+- 一键添加 Hysteria2（默认启用端口跳跃 `26800-27799`）
 - 一键添加 AnyTLS
 - 一键添加 Shadowsocks 2022
 - 一键添加 VMess-(TCP/HTTP/QUIC)
@@ -64,6 +64,9 @@ Usage: sing-box [options]... [args]...
 
 一般:
    a, add [protocol] [args... | auto]              添加配置
+   # hy2 示例: sing-box add hy2
+   #          sing-box add hy2 auto auto off
+   #          sing-box add hy2 auto auto 26800-27799
    c, change [name] [option] [args... | auto]      更改配置
    d, del [name]                                   删除配置**
    i, info [name]                                  查看配置

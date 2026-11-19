@@ -68,6 +68,7 @@ info_list=(
     "用户名 (Username)"
     "跳过证书验证 (allowInsecure)"
     "拥塞控制算法 (congestion_control)"
+    "端口跳跃 (mport)"
 )
 change_list=(
     "更改协议"
@@ -346,6 +347,11 @@ create() {
         [[ $is_config_file ]] && is_no_del_msg=1 && del $is_config_file
         # save json to file
         cat <<<$is_new_json >$is_json_file
+        # hysteria2 port hopping (NAT redirect)
+        [[ $is_protocol == 'hysteria2' && $is_hy2_hop_ports ]] && {
+            load hy2_hop.sh
+            hy2_hop_apply_for_config "$is_config_name" "$port" "$is_hy2_hop_ports"
+        }
         if [[ $is_new_install ]]; then
             # config.json
             create config.json
@@ -662,6 +668,15 @@ del() {
             msg "\n是否删除配置文件?: $is_config_file"
             pause
         fi
+        # cleanup hysteria2 port hopping rules/sidecar
+        [[ -f $is_conf_dir/"$is_config_file".hop ]] && {
+            load hy2_hop.sh
+            # keep in-memory hop range for recreate (change/full)
+            is_hy2_hop_ports_bak=$is_hy2_hop_ports
+            hy2_hop_remove_for_config "$is_config_file"
+            [[ $is_hy2_hop_ports_bak ]] && is_hy2_hop_ports=$is_hy2_hop_ports_bak
+            unset is_hy2_hop_ports_bak
+        }
         rm -rf $is_conf_dir/"$is_config_file"
         [[ ! $is_new_json ]] && manage restart &
         [[ ! $is_no_del_msg ]] && _green "\n已删除: $is_config_file\n"
@@ -696,6 +711,8 @@ uninstall() {
     fi
     manage stop &>/dev/null
     manage disable &>/dev/null
+    load hy2_hop.sh
+    hy2_hop_clear_all &>/dev/null
     rm -rf $is_core_dir $is_log_dir $is_sh_bin ${is_sh_bin/$is_core/sb}
     if [[ $is_systemd ]]; then
         rm -f /lib/systemd/system/$is_core.service
@@ -856,7 +873,13 @@ add() {
         is_use_uuid=$3
         is_add_opts="[port] [uuid]"
         ;;
-    trojan* | hysteria*)
+    hysteria*)
+        is_use_port=$2
+        is_use_pass=$3
+        is_use_hop=$4
+        is_add_opts="[port] [password] [hop_ports|auto|off]"
+        ;;
+    trojan*)
         is_use_port=$2
         is_use_pass=$3
         is_add_opts="[port] [password]"
@@ -923,6 +946,33 @@ add() {
     # no-auto-tls only use h2,ws,grpc
     if [[ $is_no_auto_tls && ! $is_use_tls ]]; then
         err "$is_new_protocol 不支持手动配置 tls."
+    fi
+
+    # hysteria2 port hopping args
+    if [[ ${is_new_protocol,,} =~ hysteria ]]; then
+        load hy2_hop.sh
+        unset is_hy2_hop_off
+        if [[ $is_use_hop ]]; then
+            case ${is_use_hop,,} in
+            auto)
+                unset is_hy2_hop_ports
+                ;;
+            off | none | disable | 0)
+                is_hy2_hop_off=1
+                unset is_hy2_hop_ports
+                ;;
+            *)
+                is_hy2_hop_ports=$is_use_hop
+                ;;
+            esac
+        fi
+        # keep existing hop on change unless explicitly disabled/reassigned
+        [[ ! $is_use_hop && $is_change && ! $is_hy2_hop_ports && ! $is_hy2_hop_off ]] && {
+            [[ -f $is_conf_dir/$is_config_file.hop ]] && hy2_hop_load_file "$is_conf_dir/$is_config_file.hop"
+        }
+        hy2_hop_validate_or_pick
+    else
+        unset is_hy2_hop_ports is_hy2_hop_off
     fi
 
     # prefer args.
@@ -1071,6 +1121,13 @@ add() {
         get install-caddy
     fi
 
+    # hysteria2: finalize listen port outside hop range
+    if [[ ${is_new_protocol,,} =~ hysteria && $is_hy2_hop_ports ]]; then
+        load hy2_hop.sh
+        [[ ! $port ]] && get_port && port=$tmp_port
+        hy2_hop_prepare_listen_port
+    fi
+
     # create json
     create server $is_new_protocol
 
@@ -1136,6 +1193,13 @@ get() {
             # extract anytls ACME domain
             [[ $is_protocol == 'anytls' ]] && {
                 is_anytls_domain=$(jq -r '(.inbounds[0].tls.certificate_provider.domain[0] // .inbounds[0].tls.acme.domain[0]) // empty' <<<$is_json_str 2>/dev/null)
+            }
+
+            # hysteria2 port hopping sidecar
+            unset is_hy2_hop_ports
+            [[ -f $is_conf_dir/"$is_config_file".hop ]] && {
+                load hy2_hop.sh
+                hy2_hop_load_file "$is_conf_dir/$is_config_file.hop"
             }
 
             is_config_name=$is_config_file
@@ -1419,8 +1483,14 @@ info() {
     hy*)
         is_can_change=(0 1 4)
         is_info_show=(0 1 2 10 8 9 20)
-        is_url="$is_protocol://$password@$is_addr:$port?alpn=h3&insecure=1#233boy-$net-$is_addr"
+        is_hy2_url_query="alpn=h3&insecure=1"
+        if [[ $is_hy2_hop_ports ]]; then
+            is_info_show+=(22)
+            is_hy2_url_query="${is_hy2_url_query}&mport=${is_hy2_hop_ports}"
+        fi
+        is_url="$is_protocol://$password@$is_addr:$port?${is_hy2_url_query}#233boy-$net-$is_addr"
         is_info_str=($is_protocol $is_addr $port $password tls h3 true)
+        [[ $is_hy2_hop_ports ]] && is_info_str+=($is_hy2_hop_ports)
         ;;
     tuic)
         is_insecure=1
@@ -1797,6 +1867,10 @@ main() {
     get-port)
         get_port
         msg $tmp_port
+        ;;
+    hy2-hop-restore)
+        load hy2_hop.sh
+        hy2_hop_restore_all
         ;;
     main)
         is_main_menu
