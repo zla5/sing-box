@@ -16,8 +16,8 @@ hy2_hop_parse_range() {
     hy2_hop_end=${BASH_REMATCH[2]}
     [[ $(is_test port $hy2_hop_start) && $(is_test port $hy2_hop_end) ]] || return 1
     [[ $hy2_hop_start -lt $hy2_hop_end ]] || return 1
-    # keep ranges compact to reduce accidental collisions
-    [[ $((hy2_hop_end - hy2_hop_start)) -le 10000 ]] || return 1
+    # allow wide ranges (e.g. 30000-50999); reject full 1-65535 style mistakes
+    [[ $((hy2_hop_end - hy2_hop_start)) -le 40000 ]] || return 1
 }
 
 hy2_hop_port_in_range() {
