@@ -71,7 +71,7 @@ is_log_dir=/var/log/$is_core
 is_sh_bin=/usr/local/bin/$is_core
 is_sh_dir=$is_core_dir/sh
 is_sh_repo=$author/$is_core
-is_pkg="wget tar bash"
+is_pkg="wget tar bash qrencode"
 # Alpine: gcompat provides glibc compatibility for prebuilt binaries
 [[ $cmd =~ apk ]] && is_pkg="$is_pkg gcompat jq"
 is_config_json=$is_core_dir/config.json
@@ -451,8 +451,8 @@ main() {
     mkdir -p $is_conf_dir
 
     load core.sh
-    # create a reality config
-    add reality
+    # create a hysteria2 config with port hopping by default
+    add hy2 auto auto 30000-50999
     # wait for background tasks (e.g., OpenRC service start)
     wait
     # remove tmp dir and exit.

@@ -12,10 +12,10 @@
 - 兼容 sing-box 命令
 - 强大的快捷参数
 - 支持所有常用协议
-- 一键添加 VLESS-REALITY (默认)
+- 一键添加 Hysteria2（安装默认；端口跳跃 `30000-50999`）
+- 一键添加 VLESS-REALITY
 - 一键添加 TUIC
 - 一键添加 Trojan
-- 一键添加 Hysteria2（默认启用端口跳跃 `26800-27799`）
 - 一键添加 AnyTLS
 - 一键添加 Shadowsocks 2022
 - 一键添加 VMess-(TCP/HTTP/QUIC)

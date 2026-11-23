@@ -1558,6 +1558,16 @@ info() {
         [[ $is_insecure ]] && {
             warn "某些客户端如(V2rayN 等)导入URL需手动将: 跳过证书验证(allowInsecure) 设置为 true, 或打开: 允许不安全的连接"
         }
+        # always show QR code together with the share link
+        msg "------------- QR code 二维码 -------------"
+        if [[ $(type -P qrencode) ]]; then
+            msg
+            qrencode -t ANSIUTF8 "${is_url}" 2>/dev/null || qrencode -t ANSI "${is_url}"
+            msg
+        else
+            warn "未安装 qrencode, 无法显示二维码. 安装: $(_green "$cmd update -y; $cmd install qrencode -y")"
+            msg "也可使用在线生成: $(msg_ul "https://233boy.github.io/tools/qr.html#${is_url}")"
+        fi
     fi
     if [[ $is_no_auto_tls ]]; then
         msg "------------- no-auto-tls INFO -------------"
