@@ -6,7 +6,13 @@ get_latest_version() {
         ;;
     sh)
         name="$is_core_name 脚本"
-        url="https://api.github.com/repos/$is_sh_repo/releases/latest?v=$RANDOM"
+        # compare against main branch script version (fork may have no GitHub Releases)
+        latest_ver=$(_wget -qO- "https://raw.githubusercontent.com/${is_sh_repo}/main/sing-box.sh?v=$RANDOM" | grep -E '^is_sh_ver=' | head -1 | cut -d= -f2 | tr -d '"' | tr -d "'")
+        [[ ! $latest_ver ]] && {
+            err "获取 ${name} 最新版本失败."
+        }
+        unset name url
+        return
         ;;
     caddy)
         name="Caddy"
@@ -40,9 +46,9 @@ download() {
     sh)
         name="$is_core_name 脚本"
         tmpfile=$tmpdir/sh.tar.gz
-        link="https://github.com/${is_sh_repo}/releases/download/${latest_ver}/code.tar.gz"
+        link="https://github.com/${is_sh_repo}/archive/refs/heads/main.tar.gz"
         download_file
-        tar zxf $tmpfile -C $is_sh_dir
+        tar zxf $tmpfile --strip-components 1 -C $is_sh_dir
         chmod +x $is_sh_bin ${is_sh_bin/$is_core/sb}
         ;;
     caddy)

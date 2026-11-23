@@ -1,7 +1,7 @@
 #!/bin/bash
 
-author=233boy
-# github=https://github.com/233boy/sing-box
+author=zla5
+# github=https://github.com/zla5/sing-box
 
 # bash fonts colors
 red='\e[31m'
@@ -177,7 +177,8 @@ download() {
         is_ok=$is_core_ok
         ;;
     sh)
-        link=https://github.com/${is_sh_repo}/releases/latest/download/code.tar.gz
+        # install from this fork's main branch (not upstream 233boy releases)
+        link=https://github.com/${is_sh_repo}/archive/refs/heads/main.tar.gz
         name="$is_core_name 脚本"
         tmpfile=$tmpsh
         is_ok=$is_sh_ok
@@ -408,7 +409,8 @@ main() {
     if [[ $local_install ]]; then
         cp -rf $PWD/* $is_sh_dir
     else
-        tar zxf $is_sh_ok -C $is_sh_dir
+        # GitHub branch archive nests files under <repo>-<branch>/
+        tar zxf $is_sh_ok --strip-components 1 -C $is_sh_dir
     fi
 
     # create core bin dir
