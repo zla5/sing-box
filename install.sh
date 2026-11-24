@@ -451,6 +451,17 @@ main() {
     mkdir -p $is_conf_dir
 
     load core.sh
+    # install.sh does not source init.sh; ensure TLS material exists before first config
+    is_tls_cer=$is_core_dir/bin/tls.cer
+    is_tls_key=$is_core_dir/bin/tls.key
+    [[ ! -f $is_tls_cer || ! -f $is_tls_key ]] && {
+        is_tls_tmp=${is_tls_key/key/tmp}
+        $is_core_bin generate tls-keypair tls -m 456 >$is_tls_tmp
+        awk '/BEGIN PRIVATE KEY/,/END PRIVATE KEY/' $is_tls_tmp >$is_tls_key
+        awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' $is_tls_tmp >$is_tls_cer
+        rm -f $is_tls_tmp
+    }
+    [[ ! -f $is_tls_cer || ! -f $is_tls_key ]] && err "生成 TLS 证书失败."
     # create a hysteria2 config with port hopping by default
     add hy2 auto auto 30000-50999
     # wait for background tasks (e.g., OpenRC service start)
