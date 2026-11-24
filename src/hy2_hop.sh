@@ -85,14 +85,76 @@ hy2_hop_validate_or_pick() {
     hy2_hop_pick_range "$is_config_file"
 }
 
+hy2_hop_find_bin() {
+    local name=$1 p
+    for p in $(type -P "$name" 2>/dev/null) /usr/sbin/"$name" /sbin/"$name" /usr/bin/"$name" /bin/"$name"; do
+        [[ -x $p ]] && {
+            echo "$p"
+            return
+        }
+    done
+    return 1
+}
+
+hy2_hop_resolve_bins() {
+    hy2_hop_nft_bin=$(hy2_hop_find_bin nft)
+    hy2_hop_ipt_bin=$(hy2_hop_find_bin iptables)
+    [[ ! $hy2_hop_ipt_bin ]] && hy2_hop_ipt_bin=$(hy2_hop_find_bin iptables-nft)
+    [[ ! $hy2_hop_ipt_bin ]] && hy2_hop_ipt_bin=$(hy2_hop_find_bin iptables-legacy)
+    hy2_hop_ip6t_bin=$(hy2_hop_find_bin ip6tables)
+    [[ ! $hy2_hop_ip6t_bin ]] && hy2_hop_ip6t_bin=$(hy2_hop_find_bin ip6tables-nft)
+    [[ ! $hy2_hop_ip6t_bin ]] && hy2_hop_ip6t_bin=$(hy2_hop_find_bin ip6tables-legacy)
+}
+
+hy2_hop_install_tools() {
+    local pkgs
+    [[ $hy2_hop_tools_tried ]] && return 1
+    hy2_hop_tools_tried=1
+    msg "正在安装 iptables/nftables 以启用 Hysteria2 端口跳跃..."
+    if [[ $cmd =~ apt-get ]]; then
+        $cmd update -y &>/dev/null
+        $cmd install -y iptables iptables-persistent &>/dev/null || $cmd install -y iptables &>/dev/null
+    elif [[ $cmd =~ yum || $cmd =~ dnf ]]; then
+        $cmd install -y iptables iptables-nft &>/dev/null || $cmd install -y iptables &>/dev/null
+    elif [[ $cmd =~ zypper ]]; then
+        $cmd install -y iptables &>/dev/null
+    elif [[ $cmd =~ apk ]]; then
+        $cmd add iptables iptables-legacy &>/dev/null || $cmd add iptables &>/dev/null
+        $cmd add nftables &>/dev/null
+    else
+        return 1
+    fi
+    # ensure PATH can see sbin tools for later calls
+    export PATH="/usr/sbin:/sbin:$PATH"
+    hy2_hop_resolve_bins
+    [[ $hy2_hop_ipt_bin || $hy2_hop_nft_bin ]]
+}
+
+hy2_hop_ensure_tools() {
+    hy2_hop_resolve_bins
+    [[ $hy2_hop_ipt_bin || $hy2_hop_nft_bin ]] && return
+    hy2_hop_install_tools || return 1
+    hy2_hop_resolve_bins
+    [[ $hy2_hop_ipt_bin || $hy2_hop_nft_bin ]]
+}
+
 hy2_hop_backend() {
-    if type -P nft &>/dev/null; then
-        echo nft
-    elif type -P iptables &>/dev/null; then
+    hy2_hop_resolve_bins
+    # prefer iptables REDIRECT (matches official Hysteria docs); nft as fallback
+    if [[ $hy2_hop_ipt_bin ]]; then
         echo iptables
+    elif [[ $hy2_hop_nft_bin ]]; then
+        echo nft
     else
         echo none
     fi
+}
+
+hy2_hop_modprobe_nat() {
+    modprobe iptable_nat &>/dev/null
+    modprobe ip6table_nat &>/dev/null
+    modprobe xt_REDIRECT &>/dev/null
+    modprobe nf_nat &>/dev/null
 }
 
 hy2_hop_remove_rules() {
@@ -102,18 +164,26 @@ hy2_hop_remove_rules() {
     start=$hy2_hop_start
     end=$hy2_hop_end
     tag="${is_hy2_hop_comment_prefix}-${listen_port}"
+    hy2_hop_resolve_bins
 
-    if type -P nft &>/dev/null; then
-        nft delete chain inet $is_hy2_hop_nft_table "$tag" &>/dev/null
+    if [[ $hy2_hop_nft_bin ]]; then
+        "$hy2_hop_nft_bin" delete chain inet $is_hy2_hop_nft_table "$tag" &>/dev/null
     fi
-    if type -P iptables &>/dev/null; then
-        while iptables -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null; do
-            iptables -t nat -D PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null || break
+    if [[ $hy2_hop_ipt_bin ]]; then
+        while "$hy2_hop_ipt_bin" -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null; do
+            "$hy2_hop_ipt_bin" -t nat -D PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null || break
+        done
+        # also try without comment match (older/busybox iptables)
+        while "$hy2_hop_ipt_bin" -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" &>/dev/null; do
+            "$hy2_hop_ipt_bin" -t nat -D PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" &>/dev/null || break
         done
     fi
-    if type -P ip6tables &>/dev/null; then
-        while ip6tables -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null; do
-            ip6tables -t nat -D PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null || break
+    if [[ $hy2_hop_ip6t_bin ]]; then
+        while "$hy2_hop_ip6t_bin" -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null; do
+            "$hy2_hop_ip6t_bin" -t nat -D PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null || break
+        done
+        while "$hy2_hop_ip6t_bin" -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" &>/dev/null; do
+            "$hy2_hop_ip6t_bin" -t nat -D PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" &>/dev/null || break
         done
     fi
 }
@@ -126,28 +196,43 @@ hy2_hop_add_rules() {
     end=$hy2_hop_end
     tag="${is_hy2_hop_comment_prefix}-${listen_port}"
 
+    hy2_hop_ensure_tools || {
+        warn "未找到 nftables/iptables, 无法自动配置 Hysteria2 端口跳跃; 请手动安装: apt/yum/apk install iptables"
+        warn "然后执行: $is_core hy2-hop-restore  或手动转发 UDP $range -> $listen_port"
+        return 1
+    }
+    hy2_hop_modprobe_nat
+
     case $(hy2_hop_backend) in
     nft)
-        nft add table inet $is_hy2_hop_nft_table &>/dev/null
-        nft delete chain inet $is_hy2_hop_nft_table "$tag" &>/dev/null
-        nft add chain inet $is_hy2_hop_nft_table "$tag" '{ type nat hook prerouting priority dstnat; policy accept; }' &>/dev/null || {
+        "$hy2_hop_nft_bin" add table inet $is_hy2_hop_nft_table &>/dev/null
+        "$hy2_hop_nft_bin" delete chain inet $is_hy2_hop_nft_table "$tag" &>/dev/null
+        "$hy2_hop_nft_bin" add chain inet $is_hy2_hop_nft_table "$tag" '{ type nat hook prerouting priority dstnat; policy accept; }' &>/dev/null || {
             warn "nftables 添加 Hysteria2 端口跳跃规则失败."
             return 1
         }
-        nft add rule inet $is_hy2_hop_nft_table "$tag" udp dport ${start}-${end} redirect to :"$listen_port" comment \""$tag"\" &>/dev/null || {
+        "$hy2_hop_nft_bin" add rule inet $is_hy2_hop_nft_table "$tag" udp dport ${start}-${end} redirect to :"$listen_port" comment \""$tag"\" &>/dev/null || {
             warn "nftables 添加 Hysteria2 端口跳跃规则失败."
             return 1
         }
         ;;
     iptables)
-        iptables -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null || \
-            iptables -t nat -A PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" || {
-                warn "iptables 添加 Hysteria2 端口跳跃规则失败."
-                return 1
-            }
-        if type -P ip6tables &>/dev/null; then
-            ip6tables -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null || \
-                ip6tables -t nat -A PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null
+        if ! "$hy2_hop_ipt_bin" -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null && \
+           ! "$hy2_hop_ipt_bin" -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" &>/dev/null; then
+            if ! "$hy2_hop_ipt_bin" -t nat -A PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null; then
+                # busybox / limited iptables may not support comment
+                "$hy2_hop_ipt_bin" -t nat -A PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" || {
+                    warn "iptables 添加 Hysteria2 端口跳跃规则失败 (可能是容器未开放 netfilter NAT)."
+                    return 1
+                }
+            fi
+        fi
+        if [[ $hy2_hop_ip6t_bin ]]; then
+            if ! "$hy2_hop_ip6t_bin" -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null && \
+               ! "$hy2_hop_ip6t_bin" -t nat -C PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" &>/dev/null; then
+                "$hy2_hop_ip6t_bin" -t nat -A PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" -m comment --comment "$tag" &>/dev/null || \
+                    "$hy2_hop_ip6t_bin" -t nat -A PREROUTING -p udp --dport ${start}:${end} -j REDIRECT --to-ports "$listen_port" &>/dev/null
+            fi
         fi
         ;;
     *)
@@ -191,14 +276,14 @@ hy2_hop_apply_for_config() {
     [[ $is_gen || $is_test_json ]] && return
     [[ $range ]] || return
     hy2_hop_remove_for_config "$name"
-    # remove_for_config deletes file; re-add rules + save
+    # always persist hop intent so share links keep mport; NAT rules are best-effort
+    hy2_hop_save "$name" "$listen_port" "$range"
     if hy2_hop_add_rules "$listen_port" "$range"; then
-        hy2_hop_save "$name" "$listen_port" "$range"
         hy2_hop_ensure_persist
         msg "已启用端口跳跃: UDP $range -> $listen_port"
         warn "请确认云厂商安全组 / 系统防火墙已放行 UDP $range"
     else
-        unset is_hy2_hop_ports
+        warn "端口跳跃链接已生成 (mport=$range), 但系统 NAT 规则未生效; 安装 iptables 后执行: $is_core hy2-hop-restore"
     fi
 }
 
@@ -225,8 +310,9 @@ hy2_hop_clear_all() {
         name=${name%.hop}
         hy2_hop_remove_for_config "$name"
     done
-    if type -P nft &>/dev/null; then
-        nft delete table inet $is_hy2_hop_nft_table &>/dev/null
+    hy2_hop_resolve_bins
+    if [[ $hy2_hop_nft_bin ]]; then
+        "$hy2_hop_nft_bin" delete table inet $is_hy2_hop_nft_table &>/dev/null
     fi
 }
 
